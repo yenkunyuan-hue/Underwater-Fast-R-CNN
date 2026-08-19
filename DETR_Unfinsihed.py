@@ -7,11 +7,14 @@ from Deformable_CNN_Runable import UnderwaterData
 import os
 from sklearn.model_selection import KFold, train_test_split
 import numpy as np
+import cv2
+from torch.utils.data import Dataset, DataLoader
 import torch.nn as nn
 from torchvision.models import resnet50 as res_model, Weights
 from torchvision.models import ResNet50_Weights
 from torchvision.models._utils import IntermediateLayerGetter
 from torchvision.ops import box_convert, generalized_box_iou_loss
+from Deformable_CNN_Runable import UnderwaterData
 import ssl
 import torch.nn.functional as F
 from matcher import build_matcher, HungarianMatcher
@@ -20,7 +23,6 @@ ssl._create_default_https_context = ssl._create_unverified_context
 
 device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
 print(f"当前计算加速设备: {device}")
-
 
 class DETR_backbone(nn.Module):
     def __init__(self, num_feature=256):
@@ -42,44 +44,11 @@ class DETR_backbone(nn.Module):
             param.requires_grad = trainable
 
 class positional_encode(nn.Module):
-    #make a X-Y coordinate to highlight the positional feature to the model
-    def __init__(self,num_feature=256, temperature = 10000):
-        super().__init__()
-        self.temperature = temperature
-        self.num_feature = num_feature
-
-    class positional_encode(nn.Module):
         # make a X-Y coordinate to highlight the positional feature to the model
-        def __init__(self, num_feature=256, temperature=10000):
+    def __init__(self, num_feature=256, temperature=10000):
             super().__init__()
             self.temperature = temperature
             self.num_feature = num_feature
-
-        def forward(self, image):
-            batch, channel, x, y = image.shape
-            mask = torch.ones((batch, x, y), device=image.device)
-            x_embed = mask.cumsum(1, dtype=torch.float32)
-            # dim 指的是batch,y,z,根据哪个作为制作递增的依据
-            y_embed = mask.cumsum(2, dtype=torch.float32)
-            # divide into x-y plane, each plane is processed with cos and sin as these 2 are orthogonal
-
-            # PE = sin/cos (pos/temperature ** (2i/d))
-            # i: index of dimension, d: dimenisonal size
-            # dim_t是括号内的东西
-            dim_t = torch.arange(self.num_feature//2, dtype=torch.float32, device=image.device)  # num_feature个1's list
-            dim_t = self.temperature ** (2 * (dim_t // 2) / (self.num_feature // 2))
-            # 把x-y坐标转换成num_feature/2个三角函数曲线
-            # i就是对应0-num_feature
-            pos_x = x_embed[:, :, :, None] / dim_t
-            pos_y = y_embed[:, :, :, None] / dim_t
-
-            pos_x = torch.stack((pos_x[:, :, :, 0::2].sin(), pos_x[:, :, :, 1::2].cos()), dim=4).flatten(3)
-            # 把两个(B,H,W,num_feature/2)合并成(B,H,W,num_feature/2，2)再合并成(B,H,W,num_feature)
-            pos_y = torch.stack((pos_y[:, :, :, 0::2].sin(), pos_y[:, :, :, 1::2].cos()), dim=4).flatten(3)
-
-            pos = torch.cat((pos_x, pos_y), dim=3).permute(0, 3, 1, 2)
-            # 和backbone格式统一，第二位是num_feature
-            return pos
 
     def forward(self, image):
         batch, channel, x, y = image.shape
@@ -185,15 +154,15 @@ class DETR(nn.Module):
 
 
 class criterion(nn.Module):
-    def __init__(self, matcher, class_num, weight_dict, back_coef):
+    def __init__(self, matcher, weight_dict, class_num=10, back_coef=0.01):
         super().__init__()
         self.matcher = matcher
         self.class_num = class_num
-        self.weighr_dict = weight_dict
+        self.weight_dict = weight_dict
         self.back_coef = back_coef
         self.initial_weight = torch.ones(class_num)
         self.initial_weight[-1] = back_coef
-        self.register_buffer('initial weight', self.initial_weight)
+        self.register_buffer('initial_weight', self.initial_weight)
 
     def forward(self, prediction, target):
         num_box = 0
@@ -201,22 +170,21 @@ class criterion(nn.Module):
         pred_type = prediction['pred_logits']
         pred_box = prediction['pred_boxes']
         #class_num处object is background
-        target_type = torch.full(pred_type[:2],self.class_num)
+        target_type = torch.full(pred_type.shape[:2],self.class_num)
         for i, (index_i, index_j) in enumerate(dice):
             num_box += len(index_i)
             target_type[i][index_i] = target['labels'][index_j]
 
-        loss_classif = F.cross_entropy(pred_type,target_type)
+        loss_classif = F.cross_entropy(pred_type.transpose(1,2),target_type)
 
         num_box = max(num_box,1)
         loss_bbox = 0
         loss_giou = 0
 
-
         for i, (index_i, index_j) in enumerate(dice):
             box_match_pred = pred_box[i, index_i]
             box_match_target = target[i]['boxes'][index_j]
-            loss_bbox += F.l1_loss(box_match_pred, box_match_pred, reduction='sum')
+            loss_bbox += F.l1_loss(box_match_pred, box_match_target, reduction='sum')
             loss_giou += generalized_box_iou_loss(box_match_target,box_match_pred)
             #after matcher, dimension of predict and target is same
         loss_bbox = loss_bbox/num_box
@@ -227,28 +195,92 @@ class criterion(nn.Module):
             'loss_classification': loss_classif
         }
         for key in loss_overall.keys():
-            if key in self.weighr_dict:
+            if key in self.weight_dict:
                 loss_overall[key] = loss_overall[key] * self.weight_dict[key]
         return sum(loss_overall.values())
 
-def one_epoch_train(model, image, target):
-    prediction = model(image)
-    matcher = HungarianMatcher(
+def one_epoch_train(model, optimizer, train_loader, criterion):
+    model.train()
+    for image, target in train_loader:
+        image_batch = torch.stack(image, dim=0).to(device)
+        image_batch = image_batch.to(device)
+        for t in target:
+            for key, value in t.item():
+                t[key] = value.to(device)
+
+        prediction = model(image_batch)
+        loss = criterion(prediction, target)
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+
+def detection_collate_fn(batch):
+    return tuple(zip(*batch)) #多目标拆开来，默认的只接受单目标的tensor
+
+
+
+weight_dict = {
+        'loss_bbox': 1,
+        'loss_giou': 1,
+        'loss_classification': 1
+    }
+path_img = '/ceph/home/student.aau.dk/fy14pi/Underwater/UMOD/vis/img'
+path_label = '/ceph/home/student.aau.dk/fy14pi/Underwater/UMOD/vis/labels'
+
+img = os.listdir(path_img)
+for i in range(0, len(img)):
+    img[i], _ = os.path.splitext(img[i])
+img = np.array(img)
+train_set, test_set = train_test_split(img, shuffle=True, random_state=20, test_size=0.1)
+train_set, validation_set = train_test_split(train_set, shuffle=True, random_state=20, test_size=0.1)
+train_data = UnderwaterData(path_label=path_label,
+                                path_image=path_img,
+                                train=train_set)
+test_data = UnderwaterData(path_label=path_label,
+                               path_image=path_img,
+                               train=test_set)
+validation_set = UnderwaterData(path_label=path_label,
+                                    path_image=path_img,
+                                    train=validation_set)
+
+train_loader = DataLoader(
+        train_data,
+        batch_size=2,
+        shuffle=True,
+        collate_fn=detection_collate_fn
+    )
+
+test_loader = DataLoader(
+        test_data,
+        batch_size=2,
+        shuffle=False,
+        collate_fn=detection_collate_fn
+    )
+validation_loader = DataLoader(
+        validation_set,
+        batch_size=2,
+        shuffle=False,
+        collate_fn=detection_collate_fn
+    )
+device = torch.device(
+        "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
+print(f"当前计算加速设备: {device}")
+
+matcher = HungarianMatcher(
         cost_class = 1,
     cost_bbox = 1,
     cost_giou = 1
     )
-
-
-
+model = DETR()
+criterion = criterion(matcher=matcher,weight_dict=weight_dict)
+optimizer = torch.optim.AdamW(model.parameters(), lr= 5e-6)
 
 if __name__ == '__main__':
-    image = torch.rand(2,3,256,256)
-    print(image.shape)
-    model = DETR(num_class=10)
-    print(model(image)['box'].shape)
-    print('----------')
-    print(model(image)['type'].shape)
+    epoch_num = 100
+    for epoch in range(0,epoch_num):
+        one_epoch_train(criterion=criterion, model=model, optimizer=optimizer, train_loader=train_loader)
+
+
 
 
 

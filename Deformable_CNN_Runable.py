@@ -469,7 +469,7 @@ def loss_graph_plot(loss_history):
     plt.savefig(save_path_2)
     plt.close()
 
-epoch_num = 70
+epoch_num = 50
 precision_history = np.zeros((5, epoch_num))
 
 def set_optimizer(model, freeze = True):
