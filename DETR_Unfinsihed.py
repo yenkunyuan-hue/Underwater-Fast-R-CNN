@@ -3,7 +3,7 @@ from matplotlib.font_manager import weight_dict
 from sympy.integrals.manualintegrate import trig_sincos_rule
 from sympy.physics.units import temperature
 
-from main import UnderwaterData
+from Deformable_CNN_Runable import UnderwaterData
 import os
 from sklearn.model_selection import KFold, train_test_split
 import numpy as np
