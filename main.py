@@ -150,7 +150,7 @@ class fcnn(nn.Module):
         for param in self.stage2.parameters():
             param.requires_grad = trainable
         for param in self.stage1.parameters():
-            param.requires_grad = False
+            param.requires_grad = trainable
 
 class DCN(nn.Module):
     def __init__(self, input_channel, output_channel, kernel_size, stride, padding):
@@ -543,9 +543,8 @@ if __name__ == "__main__":
     print(f"当前计算加速设备: {device}")
     FCN_model = fcnn()
     model = detector(model=FCN_model).to(device)
+    optimizer = set_optimizer(model, freeze=True)
 
-    model.set_trainable(True)
-    optimizer = set_optimizer(model, freeze=False)
     for epoch in range(epoch_num):
         print(f"Current Epoch{epoch}")
         precision_history[0][epoch] = epoch
@@ -558,10 +557,10 @@ if __name__ == "__main__":
              prediction,target = testing(model,test_loader,device)
              prediction = NMS_with_label(prediction=prediction, IOU_threshold=0.5)
              graph_plot(path_image=path_img,prediction=prediction,round=epoch, target = target)
-        # if epoch+1 == 15:
-        #     model.set_trainable(True)
-        #     optimizer = set_optimizer(model, freeze=False)
+        if epoch+1 == 15:
+            model.set_trainable(True)
+            optimizer = set_optimizer(model, freeze=False)
     prediction, target = testing(model, test_loader, device)
-    prediction = NMS_with_label(prediction=prediction, IOU_threshold=0.5)
+    #prediction = NMS_with_label(prediction=prediction, IOU_threshold=0.5)
     graph_plot(path_image=path_img, prediction=prediction, round=epoch_num, target=target)
     loss_graph_plot(precision_history)
