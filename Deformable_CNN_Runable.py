@@ -524,7 +524,7 @@ def set_optimizer(model, freeze = True):
         print('解冻')
     return optimizer
 
-epoch_num = 50
+epoch_num = 60
 precision_history = np.zeros((5, epoch_num))
 
 #0: Average Loss, 1: Box Loss, 2: AL for validation, 3:Box for valid
@@ -587,7 +587,7 @@ if __name__ == "__main__":
              prediction,target = testing(model,test_loader,device)
              prediction = NMS_with_label(prediction=prediction, IOU_threshold=0.5)
              graph_plot(path_image=path_img,prediction=prediction,round=epoch, target = target)
-        if epoch+1 == 30:
+        if epoch+1 == 45:
             model.set_trainable(True)
             optimizer = set_optimizer(model, freeze=False)
     prediction, target = testing(model, test_loader, device)
