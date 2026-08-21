@@ -20,6 +20,7 @@ import matplotlib.pyplot as plt
 import ssl
 from torchvision.models.detection import FasterRCNN
 from torchvision.models.detection.anchor_utils import AnchorGenerator
+from S3_DSConv import DSConv
 from sklearn.metrics import classification_report
 from torchmetrics.regression import MeanSquaredError, MeanAbsolutePercentageError, MeanAbsoluteError
 
@@ -96,6 +97,31 @@ class UnderwaterData(Dataset):
 # selec_box('vis-0010')
 # targets = label_ex('vis-0010')
 #picture = image_ex('vis-0010')
+class DSConv_2D(nn.Module):
+    def __init__(self, out_channel, int_channel):
+        super().__init__()
+        self.out_channel = out_channel
+        self.x = DSConv(in_ch=int_channel,
+        out_ch=out_channel//2,
+        kernel_size=15,
+        extend_scope=1,
+        morph=0,
+        if_offset=True,
+        device=device)
+        self.y = DSConv(in_ch=int_channel,
+        out_ch=out_channel//2,
+        kernel_size=15,
+        extend_scope=1,
+        morph=1,
+        if_offset=True,
+        device=device)
+        self.fuse_channel = nn.Conv2d(kernel_size=1, in_channels=self.out_channel, out_channels=self.out_channel, stride=1, padding=0)
+    def forward(self, image):
+        x = self.x(image)
+        y = self.y(image)
+        output = torch.cat((x,y),dim=1) #concate along the channel
+        output_fused_channel = self.fuse_channel(output)
+        return output_fused_channel
 class fcnn(nn.Module):
     def __init__(self):
         super().__init__()
@@ -103,9 +129,10 @@ class fcnn(nn.Module):
         vgg16 = model(weights = VGG16_Weights.DEFAULT)
         vgg16 = vgg16.features
         vgg16_layers = list(vgg16.children())
-        vgg16_layers[24] = DCN(input_channel=512,output_channel=512, kernel_size=3, stride=(1, 1), padding=(1, 1))
-        vgg16_layers[26] = DCN(input_channel=512,output_channel=512, kernel_size=3, stride=(1, 1), padding=(1, 1))
-        vgg16_layers[28] = DCN(input_channel=512,output_channel=512, kernel_size=3, stride=(1, 1), padding=(1, 1))
+
+        vgg16_layers[24] = DSConv_2D(int_channel=512,out_channel=512)
+        vgg16_layers[26] = DSConv_2D(int_channel=512,out_channel=512)
+        vgg16_layers[28] = DSConv_2D(int_channel=512,out_channel=512)
 
         vgg_new = nn.Sequential(*vgg16_layers[0:31])
 
@@ -134,10 +161,10 @@ class fcnn(nn.Module):
         feature_lateral2 = self.lateral2(c2)
         feature_lateral3 = self.lateral3(c3)
 
-        feature_lateral3_sam = f.interpolate(feature_lateral3, scale_factor=2, mode='nearest')
+        feature_lateral3_sam = f.interpolate(feature_lateral3, size=feature_lateral2.shape[2:], mode='nearest')
         feature_lateral2 = feature_lateral2 + feature_lateral3_sam  # 改为 + 非原地加法
 
-        feature_lateral2_sam = f.interpolate(feature_lateral2, scale_factor=2, mode='nearest')
+        feature_lateral2_sam = f.interpolate(feature_lateral2, size=feature_lateral1.shape[2:], mode='nearest')
         feature_lateral1 = feature_lateral1 + feature_lateral2_sam  # 改为 + 非原地加法
 
         feature_lateral1 = self.smooth_1(feature_lateral1)
@@ -275,7 +302,7 @@ def testing(model, data_loader, device):
 
             for i in range(0,len(predictions_cpu)):
                 box_predict = (predictions_cpu[i]['boxes'].numpy())
-                label_predict = (predictions_cpu[i]['labels'].numpy()) -1
+                label_predict = (predictions_cpu[i]['labels'].numpy()) - 1
                 confidence_predict = (predictions_cpu[i]['scores'].numpy())
                 image_id = targets_cpu[i]['image_id'].item()
                 result_dict[image_id] = {
@@ -302,17 +329,20 @@ def testing(model, data_loader, device):
 
         map_per_class = result['map_per_class'].tolist()
         mar_per_class = result['mar_100_per_class'].tolist()
-        print(mar_per_class)
+        name_list = result['classes'].tolist()
 
         print("\n================ Per-Class Metrics ================")
         # 表头：<18 表示左对齐占用18字符宽度，>10 表示右对齐占用10字符宽度
         print(f"{'Class Name':<18} | {'mAP':>10} | {'Recall (mar_100)':>18}")
         print("-" * 55)
 
-        for name, map_val, mar_val in zip(object_names, map_per_class, mar_per_class):
+        for idx, name_idx in enumerate(name_list):
+            map_val = map_per_class[idx]
+            mar_val = mar_per_class[idx]
+            name = object_names[name_idx]
             # 处理 -1.0 (代表测试集中无该类真实样本的情况)
-            map_str = f"{map_val:.4f}" if map_val != -1.0 else "N/A"
-            mar_str = f"{mar_val:.4f}" if mar_val != -1.0 else "N/A"
+            map_str = f"{map_val:.2f}" if map_val != 0.0 else "N/A"
+            mar_str = f"{mar_val:.2f}" if mar_val != 0.0 else "N/A"
 
             print(f"{name:<18} | {map_str:>10} | {mar_str:>18}")
 
@@ -468,10 +498,6 @@ def loss_graph_plot(loss_history):
     )
     plt.savefig(save_path_2)
     plt.close()
-
-epoch_num = 50
-precision_history = np.zeros((5, epoch_num))
-
 def set_optimizer(model, freeze = True):
     dcn_offset_params =[]
     base_params = []
@@ -485,18 +511,22 @@ def set_optimizer(model, freeze = True):
                 base_params.append(param)
     if freeze:
         optimizer = torch.optim.AdamW([
-        {'params': base_params, 'lr': 4e-5},
+        {'params': base_params, 'lr': 2e-5},
         {'params': dcn_offset_params, 'lr': 4e-5}  # 探测支路双倍速学习
-    ], weight_decay=1e-5)
+    ], weight_decay=1e-6)
     else:
         optimizer = torch.optim.AdamW([
-                {'params': model.model.stage1.parameters(), 'lr': 5e-6},
-                {'params': model.model.stage2.parameters(), 'lr': 5e-6},
-                {'params': base_params, 'lr': 2e-5},
-                {'params': dcn_offset_params, 'lr': 2e-5}
-            ], weight_decay=1e-5)
+                {'params': model.model.stage1.parameters(), 'lr': 2e-6},
+                {'params': model.model.stage2.parameters(), 'lr': 2e-6},
+                {'params': base_params, 'lr': 3e-5},
+                {'params': dcn_offset_params, 'lr': 5e-5}
+            ], weight_decay=1e-6)
         print('解冻')
     return optimizer
+
+epoch_num = 50
+precision_history = np.zeros((5, epoch_num))
+
 #0: Average Loss, 1: Box Loss, 2: AL for validation, 3:Box for valid
 if __name__ == "__main__":
     # path_img = '/Users/yangkunyuan/PycharmProjects/Underwater/UMOD/vis/img'
@@ -557,7 +587,7 @@ if __name__ == "__main__":
              prediction,target = testing(model,test_loader,device)
              prediction = NMS_with_label(prediction=prediction, IOU_threshold=0.5)
              graph_plot(path_image=path_img,prediction=prediction,round=epoch, target = target)
-        if epoch+1 == 15:
+        if epoch+1 == 30:
             model.set_trainable(True)
             optimizer = set_optimizer(model, freeze=False)
     prediction, target = testing(model, test_loader, device)

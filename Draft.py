@@ -43,12 +43,8 @@
 #                 if parts:
 #                     all_labels.append(int(parts[0]))
 
-import torch
-a = {
-    '1':1,
-    'fu':2
-}
-b = [2, 1, 1]
-print(a.keys())
-
+a = [1,3,3]
+for c, id in enumerate (a):
+    print(id)
+    print(c)
 
