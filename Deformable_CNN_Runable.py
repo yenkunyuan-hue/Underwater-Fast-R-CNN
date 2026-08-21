@@ -298,7 +298,7 @@ def testing(model, data_loader, device):
         print(f"mAP_75 (IoU=0.75)  : {result['map_75'].item():.4f}")  # 严格指标
         print("================================================\n")
         print(f"mAP Per Class:")
-        object_names = ['cage', 'frame', 'hook', 'anchor', 'tire', 'rov', 'fish', 'oil drum']
+        object_names = ['cage', 'frame', 'hook', 'anchor', 'tire', 'rov', 'plastic bucket', 'fish', 'oil drum']
 
         map_per_class = result['map_per_class'].tolist()
         mar_per_class = result['mar_100_per_class'].tolist()
