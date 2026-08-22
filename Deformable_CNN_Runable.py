@@ -1,6 +1,7 @@
 import cv2
 import torch
 import torch.nn as nn
+import random
 from sklearn.metrics import precision_score, accuracy_score
 from sklearn.utils.multiclass import is_multilabel
 from torch.nn.functional import dropout
@@ -47,10 +48,11 @@ class FC_with_dropout(nn.Module):
 
 
 class UnderwaterData(Dataset):
-    def __init__(self, path_image, path_label,train):
+    def __init__(self, path_image, path_label,train,augment=False):
         self.path_image = path_image
         self.path_label = path_label
         self.train = train
+        self.augment = augment
     def __len__(self):
         return len(self.train)
 
@@ -92,6 +94,13 @@ class UnderwaterData(Dataset):
             'boxes': box,
             'labels': label
         }
+        if self.augment and random.random() < 0.5:
+            pic_tensor = torch.flip(pic_tensor, dims=[2])  # flip width axis (C,H,W)
+            if box.shape[0] > 0:
+                flipped = box.clone()
+                flipped[:, 0] = pic_w - box[:, 2]  # new xmin = W - old xmax
+                flipped[:, 2] = pic_w - box[:, 0]  # new xmax = W - old xmin
+                box = flipped
         return pic_tensor, target
 
 # selec_box('vis-0010')
@@ -248,7 +257,7 @@ def one_epoch_train(model, train_loader, optimizer, device, validation_loader):
     batch_count = 0
     total_batches = len(train_loader)
     model.train()
-    model.set_drop_out(rate=0.2)
+    model.set_drop_out(rate=0.1)
     loss_sum_dict = 0
     loss_box = 0
     for images, targets in train_loader:
@@ -279,6 +288,7 @@ def one_epoch_train(model, train_loader, optimizer, device, validation_loader):
 def testing(model, data_loader, device):
     metric = MeanAveragePrecision(iou_type="bbox", class_metrics=True)
     model.eval()
+    model.set_drop_out(rate=0)
     result_dict = {}
     target_dict={}
     target_correct_sum = []
@@ -543,7 +553,8 @@ if __name__ == "__main__":
     train_set, validation_set = train_test_split(train_set,shuffle=True, random_state=20, test_size=0.1)
     train_data = UnderwaterData(path_label=path_label,
                                 path_image=path_img,
-                                train=train_set)
+                                train=train_set,
+                                augment=True)
     test_data = UnderwaterData(path_label=path_label,
                                 path_image=path_img,
                                 train=test_set)
