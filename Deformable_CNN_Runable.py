@@ -590,7 +590,7 @@ if __name__ == "__main__":
 
     img = os.listdir(path_img)
     for i in range(0, len(img)):
-        img[i], _ =˚ os.path.splitext(img[i])
+        img[i], _ =os.path.splitext(img[i])
     img = np.array(img)
     train_set, test_set = train_test_split(img, shuffle=True, random_state=20, test_size=0.1)
     train_set, validation_set = train_test_split(train_set,shuffle=True, random_state=20, test_size=0.1)
