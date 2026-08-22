@@ -42,9 +42,52 @@
 #                 parts = line.strip().split()
 #                 if parts:
 #                     all_labels.append(int(parts[0]))
+#
+# a = [1,3,3]
+# for c, id in enumerate (a):
+#     print(id)
+#     print(c)
+import torch
+import torch.nn.functional as F
+from typing import List, Tuple
+def fastrcnn_loss(
+        class_logits: torch.Tensor,
+        box_regression: torch.Tensor,
+        labels: List[torch.Tensor],
+        regression_targets: List[torch.Tensor]):
+    """
+    Computes the loss for Faster R-CNN.
 
-a = [1,3,3]
-for c, id in enumerate (a):
-    print(id)
-    print(c)
+    Args:
+        class_logits (Tensor)
+        box_regression (Tensor)
+        labels (list[BoxList])
+        regression_targets (Tensor)
 
+    Returns:
+        classification_loss (Tensor)
+        box_loss (Tensor)
+    """
+
+    labels = torch.cat(labels, dim=0)
+    regression_targets = torch.cat(regression_targets, dim=0)
+
+    classification_loss = F.cross_entropy(class_logits, labels)
+
+    # get indices that correspond to the regression targets for
+    # the corresponding ground truth labels, to be used with
+    # advanced indexing
+    sampled_pos_inds_subset = torch.where(labels > 0)[0]
+    labels_pos = labels[sampled_pos_inds_subset]
+    N, num_classes = class_logits.shape
+    box_regression = box_regression.reshape(N, box_regression.size(-1) // 4, 4)
+
+    box_loss = F.smooth_l1_loss(
+        box_regression[sampled_pos_inds_subset, labels_pos],
+        regression_targets[sampled_pos_inds_subset],
+        beta=1 / 9,
+        reduction="sum",
+    )
+    box_loss = box_loss / labels.numel()
+
+    return classification_loss, box_loss

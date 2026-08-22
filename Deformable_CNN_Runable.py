@@ -2,8 +2,6 @@ import cv2
 import torch
 import torch.nn as nn
 import random
-from sklearn.metrics import precision_score, accuracy_score
-from sklearn.utils.multiclass import is_multilabel
 from torch.nn.functional import dropout
 from torchvision.models import vgg16 as model
 from torchvision.models import VGG16_Weights
@@ -22,10 +20,15 @@ import ssl
 from torchvision.models.detection import FasterRCNN
 from torchvision.models.detection.anchor_utils import AnchorGenerator
 from S3_DSConv import DSConv
-from sklearn.metrics import classification_report
-from torchmetrics.regression import MeanSquaredError, MeanAbsolutePercentageError, MeanAbsoluteError
+from loss_function import CIoURoIHeads
+
+
 
 ssl._create_default_https_context = ssl._create_unverified_context
+
+
+
+
 
 class FC_with_dropout(nn.Module):
     def __init__(self, in_channels, representation_size, dropout_rate = 0.1):
@@ -215,11 +218,49 @@ class DCN(nn.Module):
         result = self.deform(image,offset_v)
         return result
 
+def kmeans_anchor_sizes(path_label, image_ids, img_w=1280, img_h=720, k=3, n_iter=100, seed=42):
+    sizes = []
+    for sid in image_ids:
+        label_path = os.path.join(path_label, sid + '.txt')
+        if not os.path.exists(label_path):
+            continue
+        with open(label_path) as label_file:
+            for line in label_file:
+                line = line.strip()
+                if not line:
+                    continue
+                parts = line.split()
+                w = float(parts[3]) * img_w
+                h = float(parts[4]) * img_h
+                if w > 0 and h > 0:
+                    sizes.append((w * h) ** 0.5)
+
+    sizes = np.array(sizes)
+    if len(sizes) < k:
+        return (64, 128, 256)  # not enough boxes to cluster meaningfully
+
+    rng = np.random.default_rng(seed)
+    centers = rng.choice(sizes, size=k, replace=False)
+    for _ in range(n_iter):
+        distances = np.abs(sizes[:, None] - centers[None, :])
+        assignments = distances.argmin(axis=1)
+        new_centers = centers.copy()
+        for i in range(k):
+            members = sizes[assignments == i]
+            if len(members) > 0:
+                new_centers[i] = members.mean()
+        converged = np.allclose(new_centers, centers)
+        centers = new_centers
+        if converged:
+            break
+    return tuple(int(round(c)) for c in sorted(centers))
+
+
 def detection_collate_fn(batch):
     return tuple(zip(*batch)) #多目标拆开来，默认的只接受单目标的tensor
 
 class detector(nn.Module):
-    def __init__(self,model,num_class = 10, drop_out_rate=0.1):
+    def __init__(self,model,num_class = 10, drop_out_rate=0.1,anchor_sizes=(64, 128, 256)):
         super().__init__()
         self.model = model
         self.model.out_channels = 256
@@ -230,8 +271,8 @@ class detector(nn.Module):
             return {'0': p3, '1': p4, '2': p5}
         self.model.forward = forward_bridge
         anchor = AnchorGenerator(
-                sizes=((64,), (128,),(256,)),
-                aspect_ratios=((0.5, 1.0, 2.0),) * 3
+            sizes=tuple((s,) for s in anchor_sizes),
+            aspect_ratios=((0.5, 1.0, 2.0),) * 3
         )
         self.new_box_head = FC_with_dropout(
             in_channels=256 * 7 * 7,
@@ -245,6 +286,7 @@ class detector(nn.Module):
             box_score_thresh= 0.4,
             box_head = self.new_box_head
         )
+        self.detector.roi_heads.__class__ = CIoURoIHeads
     def forward(self,images_batch, targets=None):
         return self.detector(images_batch, targets)
     def set_drop_out(self, rate:float):
@@ -285,6 +327,8 @@ def one_epoch_train(model, train_loader, optimizer, device, validation_loader):
             loss_box_valid += loss_dict_valid['loss_box_reg'].item()
             batch_valid_count +=1
     return running_loss / batch_count, loss_box / batch_count, loss_sum_dict / batch_valid_count, loss_box_valid / batch_valid_count
+
+
 def testing(model, data_loader, device):
     metric = MeanAveragePrecision(iou_type="bbox", class_metrics=True)
     model.eval()
@@ -544,7 +588,6 @@ if __name__ == "__main__":
     path_img = '/ceph/home/student.aau.dk/fy14pi/Underwater/UMOD/vis/img'
     path_label = '/ceph/home/student.aau.dk/fy14pi/Underwater/UMOD/vis/labels'
 
-
     img = os.listdir(path_img)
     for i in range(0, len(img)):
         img[i], _ = os.path.splitext(img[i])
@@ -580,10 +623,11 @@ if __name__ == "__main__":
         shuffle=False,
         collate_fn= detection_collate_fn
     )
+    anchor_sizes = kmeans_anchor_sizes(path_label, train_set)
     device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
     print(f"当前计算加速设备: {device}")
     FCN_model = fcnn()
-    model = detector(model=FCN_model).to(device)
+    model = detector(model=FCN_model, anchor_sizes = anchor_sizes).to(device)
     optimizer = set_optimizer(model, freeze=True)
 
     for epoch in range(epoch_num):
