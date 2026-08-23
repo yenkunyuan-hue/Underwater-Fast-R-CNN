@@ -195,7 +195,7 @@ class criterion(nn.Module):
         loss_ciou_average = loss_ciou.sum()/num_box
 
         if loss_ciou_average<0.2:
-            auto_ciou = 0.2
+            auto_ciou = torch.tensor(0.2)
         else:
             auto_ciou = loss_ciou_average
 
