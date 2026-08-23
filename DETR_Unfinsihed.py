@@ -42,7 +42,7 @@ class DETR_backbone(nn.Module):
         output_proj = self.input(data_out) #return is a dictionary
         return output_proj
     def freeze_layer(self, trainable=False):
-        for param in self.resnet.parameters():
+        for param in self.backbone.parameters():
             param.requires_grad = trainable
 
 class positional_encode(nn.Module):
@@ -167,7 +167,7 @@ class criterion(nn.Module):
         self.initial_weight[-1] = back_coef
         self.register_buffer('initial_weight', self.initial_weight)
 
-    def forward(self, prediction, target):
+    def forward(self, prediction, target, device):
         num_box = 0
         dice = self.matcher(prediction,target)
         pred_type = prediction['pred_logits']
@@ -175,7 +175,7 @@ class criterion(nn.Module):
         box_match_pred = []
         box_match_target = []
         #class_num处object is background
-        target_type = torch.full(pred_type.shape[:2],self.class_num)
+        target_type = torch.full(pred_type.shape[:2],self.class_num, device = device)
         for i, (index_i, index_j) in enumerate(dice):
             num_box += len(index_i)
             target_type[i][index_i] = target[i]['labels'][index_j]
@@ -189,7 +189,7 @@ class criterion(nn.Module):
 
         num_box = max(num_box,1)
         loss_bbox = 0
-        loss_bbox = F.l1_loss(box_match_pred, box_match_target, reduction='none')
+        loss_bbox = F.l1_loss(box_match_pred, box_match_target, reduction='none').sum(dim=-1)
             #after matcher, dimension of predict and target is same
 
         loss_giou = generalized_box_iou_loss(box_match_target,box_match_pred,reduction='sum')
@@ -225,30 +225,33 @@ class criterion(nn.Module):
         return loss_overall
 
 def one_epoch_train(model, optimizer, train_loader, criterion):
+    losses_train = {}
+    losses_target = {}
     model.train()
     for image, target in train_loader:
         image_batch = torch.stack(image, dim=0).to(device)
         image_batch = image_batch.to(device)
-        for t in target:
-            for key, value in t.item():
-                t[key] = value.to(device)
+        target = [{k: v.to(device) for k, v in t.items()} for t in target]
         prediction = model(image_batch)
-        losses = criterion(prediction, target)
-        loss = losses.values().sum()
+        losses_train = criterion(prediction, target)
+        loss = sum(losses_train.values())
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
-        return losses
+    with torch.no_grad():
+        for image, target in validation_loader:
+            image_batch = torch.stack(image,dim=0).to(device)
+            image_batch = image_batch.to(device)
+            for t in target:
+                for key, value in t.item():
+                    t[key] = value.to(device)
+            prediction = model(image_batch)
+            losses_target = criterion(prediction, target)
+    return losses_train, losses_target
 def detection_collate_fn(batch):
     return tuple(zip(*batch)) #多目标拆开来，默认的只接受单目标的tensor
 
 
-
-weight_dict = {
-        'loss_bbox': 1,
-        'loss_giou': 1,
-        'loss_classification': 1
-    }
 path_img = '/ceph/home/student.aau.dk/fy14pi/Underwater/UMOD/vis/img'
 path_label = '/ceph/home/student.aau.dk/fy14pi/Underwater/UMOD/vis/labels'
 
@@ -303,7 +306,10 @@ optimizer = torch.optim.AdamW(model.parameters(), lr= 5e-6)
 if __name__ == '__main__':
     epoch_num = 100
     for epoch in range(0,epoch_num):
-        one_epoch_train(criterion=criterion, model=model, optimizer=optimizer, train_loader=train_loader)
+        train_loss, valid_loss = one_epoch_train(criterion=criterion,
+                                                 model=model, optimizer=optimizer, train_loader=train_loader)
+        print(f'train loss in epoch{epoch_num}: {train_loss}')
+        print(f'validation loss in epoch{epoch_num}: {valid_loss}')
 
 
 
