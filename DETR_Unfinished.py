@@ -181,7 +181,7 @@ class criterion(nn.Module):
         box_match_pred = torch.cat(box_match_pred, 0)
         box_match_target = torch.cat(box_match_target, 0)
 
-        loss_classif = F.cross_entropy(pred_type.transpose(1,2),target_type)
+        loss_classif = F.cross_entropy(pred_type.transpose(1,2),target_type, reduction='mean')
 
         num_box = max(num_box,1)
         loss_bbox = 0
@@ -367,8 +367,8 @@ if __name__ == '__main__':
                                                  train_loader=train_loader,
                                                  validation_loader = validation_loader)
 
-        print(f'train loss in epoch{epoch_num}: {train_loss}')
-        print(f'validation loss in epoch{epoch_num}: {valid_loss}')
+        print(f'train loss in epoch{epoch}: {train_loss}')
+        print(f'validation loss in epoch{epoch}: {valid_loss}')
         if epoch%10 == 0:
             testing(model,test_loader,device)
 
