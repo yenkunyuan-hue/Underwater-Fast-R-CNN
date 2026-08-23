@@ -107,7 +107,7 @@ class CIoURoIHeads(RoIHeads):
             # 4. 合成逐样本的动态权重 modulating_weight [M]
             modulating_weight = a1 * b1 + a2 * b2 + a3 * b3
             base_ciou_loss = 1.0 - ciou_vec
-            box_loss = (base_ciou_loss * modulating_weight).sum() / labels_cat.numel()
+            box_loss = (base_ciou_loss * modulating_weight).sum() / max(sampled_pos_inds_subset.numel(),1)
 
             losses = {"loss_classifier": classification_loss, "loss_box_reg": box_loss}
         else:
