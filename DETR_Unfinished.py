@@ -188,7 +188,7 @@ class criterion(nn.Module):
         loss_bbox = F.l1_loss(box_match_pred, box_match_target, reduction='none').sum(dim=-1)
             #after matcher, dimension of predict and target is same
 
-        loss_giou = generalized_box_iou_loss(box_match_target,box_match_pred,reduction='sum')
+        loss_giou = generalized_box_iou_loss(box_match_target,box_match_pred,reduction='sum')/num_box
 
         #slid box loss base on ciou
         loss_ciou = complete_iou_loss(box_match_pred, box_match_target).detach()
