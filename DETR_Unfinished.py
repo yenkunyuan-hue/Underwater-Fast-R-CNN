@@ -218,7 +218,7 @@ class criterion(nn.Module):
             'loss_classification': loss_classif,
             'loss_giou': loss_giou
         }
-
+        print(loss_overall)
         return loss_overall
 
 def one_epoch_train(model, optimizer, train_loader,validation_loader, criterion):
