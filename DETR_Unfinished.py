@@ -248,8 +248,6 @@ def detection_collate_fn(batch):
 
 def testing(model, data_loader, device):
     metric = MeanAveragePrecision(iou_type="bbox", class_metrics=True)
-    model.eval()
-    model.set_drop_out(rate=0)
     target_correct_sum = []
     predict_correct_sum = []
     with torch.no_grad():
@@ -353,7 +351,9 @@ matcher = HungarianMatcher(
     cost_giou = 1
     )
 model = DETR()
+model = model.to(device)
 criterion = criterion(matcher=matcher,weight_dict=weight_dict)
+criterion = criterion.to(device)
 optimizer = torch.optim.AdamW(model.parameters(), lr= 5e-6)
 
 if __name__ == '__main__':
