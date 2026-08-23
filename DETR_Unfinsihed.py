@@ -1,10 +1,6 @@
 import torch
 from matplotlib.font_manager import weight_dict
-from sympy import elliptic_k
-from sympy.integrals.manualintegrate import trig_sincos_rule
-from sympy.physics.units import temperature
-
-from Deformable_CNN_Runable import UnderwaterData
+from torchmetrics.detection.mean_ap import MeanAveragePrecision
 import os
 from sklearn.model_selection import KFold, train_test_split
 import numpy as np
@@ -154,8 +150,6 @@ class DETR(nn.Module):
     def melt(self, trainable=False):
         self.backbone.freeze_layer(trainable)
 
-
-
 class criterion(nn.Module):
     def __init__(self, matcher, weight_dict, class_num=10, back_coef=0.01):
         super().__init__()
@@ -224,7 +218,7 @@ class criterion(nn.Module):
 
         return loss_overall
 
-def one_epoch_train(model, optimizer, train_loader, criterion):
+def one_epoch_train(model, optimizer, train_loader,validation_loader, criterion):
     losses_train = {}
     losses_target = {}
     model.train()
@@ -248,8 +242,64 @@ def one_epoch_train(model, optimizer, train_loader, criterion):
             prediction = model(image_batch)
             losses_target = criterion(prediction, target)
     return losses_train, losses_target
+
 def detection_collate_fn(batch):
     return tuple(zip(*batch)) #多目标拆开来，默认的只接受单目标的tensor
+
+def testing(model, data_loader, device):
+    metric = MeanAveragePrecision(iou_type="bbox", class_metrics=True)
+    model.eval()
+    model.set_drop_out(rate=0)
+    target_correct_sum = []
+    predict_correct_sum = []
+    with torch.no_grad():
+        for images, targets in data_loader:
+            images_batch = torch.stack(images, dim=0).to(device)
+            predictions = model(images_batch)
+            targets_cpu = [{k: v.to('cpu') for k, v in t.items()} for t in targets]
+            predictions_cpu = [{k: v.to('cpu') for k, v in p.items()} for p in predictions]
+
+            #Update label, as 0 means ground in the model
+            for t, p in zip(targets_cpu,predictions_cpu):
+                target_correct = t.copy()
+                target_correct['pred_logits'] = target_correct['pred_logits'] - 1
+                target_correct_sum.append(target_correct)
+
+                predict_correct = p.copy()
+                predict_correct['pred_logits'] = predict_correct['pred_logits'] - 1
+                predict_correct_sum.append(predict_correct)
+
+        metric.update(predict_correct_sum, target_correct_sum)
+        result = metric.compute()
+
+        print("\n================ 测试集评估结果 ================")
+        print(f"mAP (IoU=0.50:0.95): {result['map'].item():.4f}")  # 综合大指标
+        print(f"mAP_50 (IoU=0.50)  : {result['map_50'].item():.4f}")  # 经典 PASCAL VOC 指标
+        print(f"mAP_75 (IoU=0.75)  : {result['map_75'].item():.4f}")  # 严格指标
+        print("================================================\n")
+        print(f"mAP Per Class:")
+        object_names = ['cage', 'frame', 'hook', 'anchor', 'tire', 'rov', 'plastic bucket', 'fish', 'oil drum']
+
+        map_per_class = result['map_per_class'].tolist()
+        mar_per_class = result['mar_100_per_class'].tolist()
+        name_list = result['classes'].tolist()
+
+        print("\n================ Per-Class Metrics ================")
+        # 表头：<18 表示左对齐占用18字符宽度，>10 表示右对齐占用10字符宽度
+        print(f"{'Class Name':<18} | {'mAP':>10} | {'Recall (mar_100)':>18}")
+        print("-" * 55)
+
+        for idx, name_idx in enumerate(name_list):
+            map_val = map_per_class[idx]
+            mar_val = mar_per_class[idx]
+            name = object_names[name_idx]
+            # 处理 -1.0 (代表测试集中无该类真实样本的情况)
+            map_str = f"{map_val:.2f}" if map_val != 0.0 else "N/A"
+            mar_str = f"{mar_val:.2f}" if mar_val != 0.0 else "N/A"
+
+            print(f"{name:<18} | {map_str:>10} | {mar_str:>18}")
+
+        print("===================================================================\n")
 
 
 path_img = '/ceph/home/student.aau.dk/fy14pi/Underwater/UMOD/vis/img'
@@ -263,13 +313,16 @@ train_set, test_set = train_test_split(img, shuffle=True, random_state=20, test_
 train_set, validation_set = train_test_split(train_set, shuffle=True, random_state=20, test_size=0.1)
 train_data = UnderwaterData(path_label=path_label,
                                 path_image=path_img,
-                                train=train_set)
+                                train=train_set,
+                            isCNN=False)
 test_data = UnderwaterData(path_label=path_label,
                                path_image=path_img,
-                               train=test_set)
+                               train=test_set,
+                           isCNN=False)
 validation_set = UnderwaterData(path_label=path_label,
                                     path_image=path_img,
-                                    train=validation_set)
+                                    train=validation_set,
+                                isCNN=False)
 
 train_loader = DataLoader(
         train_data,
@@ -307,12 +360,13 @@ if __name__ == '__main__':
     epoch_num = 100
     for epoch in range(0,epoch_num):
         train_loss, valid_loss = one_epoch_train(criterion=criterion,
-                                                 model=model, optimizer=optimizer, train_loader=train_loader)
+                                                 model=model, optimizer=optimizer,
+                                                 train_loader=train_loader,
+                                                 validation_loader = validation_loader)
         print(f'train loss in epoch{epoch_num}: {train_loss}')
         print(f'validation loss in epoch{epoch_num}: {valid_loss}')
-
-
-
+        if epoch//10 == epoch/10 and epoch>10:
+            testing(model,test_loader,device)
 
 
 
