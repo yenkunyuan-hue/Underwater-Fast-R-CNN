@@ -172,9 +172,9 @@ class criterion(nn.Module):
         target_type = torch.full(pred_type.shape[:2],self.class_num, device = device)
         for i, (index_i, index_j) in enumerate(dice):
             num_box += len(index_i)
-            target_type[i][index_i] = target[i]['pred_logits'][index_j]
+            target_type[i][index_i] = target[i]['labels'][index_j]
             box_match_pred.append(pred_box[i, index_i])
-            box_match_target.append(target[i]['pred_boxes'][index_j])
+            box_match_target.append(target[i]['labels'][index_j])
 
         box_match_pred = torch.cat(box_match_pred, 0)
         box_match_target = torch.cat(box_match_target, 0)
@@ -260,7 +260,7 @@ def testing(model, data_loader, device):
             #Update label, as 0 means ground in the model
             for t, p in zip(targets_cpu,predictions_cpu):
                 target_correct = t.copy()
-                target_correct['pred_logits'] = target_correct['pred_logits'] - 1
+                target_correct['labels'] = target_correct['labels'] - 1
                 target_correct_sum.append(target_correct)
 
                 predict_correct = p.copy()
@@ -312,15 +312,15 @@ train_set, validation_set = train_test_split(train_set, shuffle=True, random_sta
 train_data = UnderwaterData(path_label=path_label,
                                 path_image=path_img,
                                 train=train_set,
-                            isCNN=False)
+                            isCNN=True)
 test_data = UnderwaterData(path_label=path_label,
                                path_image=path_img,
                                train=test_set,
-                           isCNN=False)
+                           isCNN=True)
 validation_set = UnderwaterData(path_label=path_label,
                                     path_image=path_img,
                                     train=validation_set,
-                                isCNN=False)
+                                isCNN=True)
 
 train_loader = DataLoader(
         train_data,
