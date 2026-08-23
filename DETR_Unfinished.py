@@ -232,6 +232,7 @@ def one_epoch_train(model, optimizer, train_loader,validation_loader, criterion)
         prediction = model(image_batch)
         losses_train = criterion(prediction, target)
         loss = sum(losses_train.values())
+        print(loss)
         loss_overall_train += loss
         optimizer.zero_grad()
         loss.backward()
@@ -245,8 +246,8 @@ def one_epoch_train(model, optimizer, train_loader,validation_loader, criterion)
                     t[key] = value.to(device)
             prediction = model(image_batch)
             loss_overall_target += sum(criterion(prediction, target).values())
-    return loss_overall_train, loss_overall_target
-
+    # return loss_overall_train, loss_overall_target
+    return 1, 2
 def detection_collate_fn(batch):
     return tuple(zip(*batch)) #多目标拆开来，默认的只接受单目标的tensor
 
