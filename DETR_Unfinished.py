@@ -142,7 +142,7 @@ class DETR(nn.Module):
             feature_map+pos_map,
             query_tensor+query_embed
         )
-        pred_box = self.bbox(hidden_state).sigmoid()
+        pred_box = self.bbox(hidden_state)
         pred_type = self.class_head(hidden_state)
         prediction = {
             'pred_boxes':pred_box,
@@ -182,12 +182,10 @@ class criterion(nn.Module):
         box_match_pred = torch.cat(box_match_pred, 0)
         box_match_target = torch.cat(box_match_target, 0)
 
-        loss_classif = F.cross_entropy(pred_type.transpose(1,2),target_type, reduction='sum')
-        loss_classif /= num_box
+        loss_classif = F.cross_entropy(pred_type.transpose(1,2),target_type, reduction='mean')
 
         loss_bbox = 0
         loss_bbox = F.l1_loss(box_match_pred, box_match_target, reduction='none').sum(dim=-1)
-            #after matcher, dimension of predict and target is same
 
         loss_giou = generalized_box_iou_loss(box_match_target,box_match_pred,reduction='sum')/num_box
 
@@ -196,7 +194,7 @@ class criterion(nn.Module):
         loss_ciou_average = loss_ciou.sum()/num_box
 
         if loss_ciou_average<0.2:
-            auto_ciou = torch.tensor(0.2)
+            auto_ciou = torch.tensor(0.2).to(device)
         else:
             auto_ciou = loss_ciou_average
 
