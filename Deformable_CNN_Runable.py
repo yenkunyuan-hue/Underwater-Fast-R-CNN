@@ -326,7 +326,7 @@ def one_epoch_train(model, train_loader, optimizer, device, validation_loader):
             loss_sum_dict += sum(loss for loss in loss_dict_valid.values()).item()
             loss_box_valid += loss_dict_valid['loss_box_reg'].item()
             batch_valid_count +=1
-    return running_loss / batch_count, loss_box / batch_count, loss_sum_dict / batch_valid_count, loss_box_valid / batch_valid_count
+    return round(running_loss / batch_count,3), round(loss_box / batch_count, 3), round(loss_sum_dict / batch_valid_count,3), round(loss_box_valid / batch_valid_count, 3)
 
 
 def testing(model, data_loader, device):
@@ -565,15 +565,15 @@ def set_optimizer(model, freeze = True):
                 base_params.append(param)
     if freeze:
         optimizer = torch.optim.AdamW([
-        {'params': base_params, 'lr': 2e-5},
-        {'params': dcn_offset_params, 'lr': 4e-5}  # 探测支路双倍速学习
+        {'params': base_params, 'lr': 4e-5},
+        {'params': dcn_offset_params, 'lr': 8e-5}  # 探测支路双倍速学习
     ], weight_decay=1e-6)
     else:
         optimizer = torch.optim.AdamW([
-                {'params': model.model.stage1.parameters(), 'lr': 2e-6},
-                {'params': model.model.stage2.parameters(), 'lr': 2e-6},
-                {'params': base_params, 'lr': 3e-5},
-                {'params': dcn_offset_params, 'lr': 5e-5}
+                {'params': model.model.stage1.parameters(), 'lr': 1e-6},
+                {'params': model.model.stage2.parameters(), 'lr': 1e-6},
+                {'params': base_params, 'lr': 4e-5},
+                {'params': dcn_offset_params, 'lr': 4e-5}
             ], weight_decay=1e-6)
         print('解冻')
     return optimizer
@@ -607,19 +607,19 @@ if __name__ == "__main__":
 
     train_loader = DataLoader(
         train_data,
-        batch_size = 2,
+        batch_size = 4,
         shuffle=True,
         collate_fn=detection_collate_fn
     )
     test_loader = DataLoader(
         test_data,
-        batch_size = 2,
+        batch_size = 4,
     shuffle = False,
     collate_fn = detection_collate_fn
 )
     validation_loader = DataLoader(
         validation_set,
-        batch_size = 2,
+        batch_size = 4,
         shuffle=False,
         collate_fn= detection_collate_fn
     )

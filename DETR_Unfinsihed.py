@@ -1,5 +1,6 @@
 import torch
 from matplotlib.font_manager import weight_dict
+from sympy import elliptic_k
 from sympy.integrals.manualintegrate import trig_sincos_rule
 from sympy.physics.units import temperature
 
@@ -18,6 +19,7 @@ from Deformable_CNN_Runable import UnderwaterData
 import ssl
 import torch.nn.functional as F
 from matcher import build_matcher, HungarianMatcher
+from loss_function import complete_iou_loss
 
 ssl._create_default_https_context = ssl._create_unverified_context
 
@@ -153,6 +155,7 @@ class DETR(nn.Module):
         self.backbone.freeze_layer(trainable)
 
 
+
 class criterion(nn.Module):
     def __init__(self, matcher, weight_dict, class_num=10, back_coef=0.01):
         super().__init__()
@@ -169,35 +172,57 @@ class criterion(nn.Module):
         dice = self.matcher(prediction,target)
         pred_type = prediction['pred_logits']
         pred_box = prediction['pred_boxes']
+        box_match_pred = []
+        box_match_target = []
         #class_num处object is background
         target_type = torch.full(pred_type.shape[:2],self.class_num)
         for i, (index_i, index_j) in enumerate(dice):
             num_box += len(index_i)
-            target_type[i][index_i] = target['labels'][index_j]
+            target_type[i][index_i] = target[i]['labels'][index_j]
+            box_match_pred.append(pred_box[i, index_i])
+            box_match_target.append(target[i]['boxes'][index_j])
+
+        box_match_pred = torch.cat(box_match_pred, 0)
+        box_match_target = torch.cat(box_match_target, 0)
 
         loss_classif = F.cross_entropy(pred_type.transpose(1,2),target_type)
 
         num_box = max(num_box,1)
         loss_bbox = 0
-        loss_giou = 0
-
-        for i, (index_i, index_j) in enumerate(dice):
-            box_match_pred = pred_box[i, index_i]
-            box_match_target = target[i]['boxes'][index_j]
-            loss_bbox += F.l1_loss(box_match_pred, box_match_target, reduction='sum')
-            loss_giou += generalized_box_iou_loss(box_match_target,box_match_pred)
+        loss_bbox = F.l1_loss(box_match_pred, box_match_target, reduction='none')
             #after matcher, dimension of predict and target is same
-        loss_bbox = loss_bbox/num_box
-        loss_giou = loss_giou/num_box
+
+        loss_giou = generalized_box_iou_loss(box_match_target,box_match_pred,reduction='sum')
+
+        #slid box loss base on ciou
+        loss_ciou = complete_iou_loss(box_match_pred, box_match_target).detach()
+        loss_ciou_average = loss_ciou.sum()/num_box
+
+        if loss_ciou_average<0.2:
+            auto_ciou = 0.2
+        else:
+            auto_ciou = loss_ciou_average
+
+        ciou_vec = loss_ciou
+        b1 = (ciou_vec <= auto_ciou - 0.1).float()
+        a1 = 1.0
+
+        b2 = ((ciou_vec > (auto_ciou - 0.1)) & (ciou_vec < auto_ciou)).float()
+        a2 = torch.exp(auto_ciou)
+
+        b3 = (ciou_vec >= auto_ciou).float()
+        a3 = torch.exp(-(ciou_vec - 1.0))
+
+        # 4. 合成逐样本的动态权重 modulating_weight [M]
+        modulating_weight = a1 * b1 + a2 * b2 + a3 * b3
+        loss_bbox *= modulating_weight
         loss_overall ={
             'loss_bbox': loss_bbox,
-            'loss_giou': loss_giou,
-            'loss_classification': loss_classif
+            'loss_classification': loss_classif,
+            'loss_giou': loss_giou
         }
-        for key in loss_overall.keys():
-            if key in self.weight_dict:
-                loss_overall[key] = loss_overall[key] * self.weight_dict[key]
-        return sum(loss_overall.values())
+
+        return loss_overall
 
 def one_epoch_train(model, optimizer, train_loader, criterion):
     model.train()
@@ -207,13 +232,13 @@ def one_epoch_train(model, optimizer, train_loader, criterion):
         for t in target:
             for key, value in t.item():
                 t[key] = value.to(device)
-
         prediction = model(image_batch)
-        loss = criterion(prediction, target)
+        losses = criterion(prediction, target)
+        loss = losses.values().sum()
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
-
+        return losses
 def detection_collate_fn(batch):
     return tuple(zip(*batch)) #多目标拆开来，默认的只接受单目标的tensor
 
