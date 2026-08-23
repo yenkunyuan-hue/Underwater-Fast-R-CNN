@@ -177,13 +177,14 @@ class criterion(nn.Module):
             target_type[i][index_i] = target[i]['labels'][index_j]
             box_match_pred.append(pred_box[i, index_i])
             box_match_target.append(target[i]['boxes'][index_j])
+        num_box = max(num_box,1)
 
         box_match_pred = torch.cat(box_match_pred, 0)
         box_match_target = torch.cat(box_match_target, 0)
 
-        loss_classif = F.cross_entropy(pred_type.transpose(1,2),target_type, reduction='mean')
+        loss_classif = F.cross_entropy(pred_type.transpose(1,2),target_type, reduction='sum')
+        loss_classif /= num_box
 
-        num_box = max(num_box,1)
         loss_bbox = 0
         loss_bbox = F.l1_loss(box_match_pred, box_match_target, reduction='none').sum(dim=-1)
             #after matcher, dimension of predict and target is same
