@@ -172,9 +172,9 @@ class criterion(nn.Module):
         target_type = torch.full(pred_type.shape[:2],self.class_num, device = device)
         for i, (index_i, index_j) in enumerate(dice):
             num_box += len(index_i)
-            target_type[i][index_i] = target[i]['labels'][index_j]
+            target_type[i][index_i] = target[i]['pred_logits'][index_j]
             box_match_pred.append(pred_box[i, index_i])
-            box_match_target.append(target[i]['boxes'][index_j])
+            box_match_target.append(target[i]['pred_boxes'][index_j])
 
         box_match_pred = torch.cat(box_match_pred, 0)
         box_match_target = torch.cat(box_match_target, 0)
