@@ -161,7 +161,7 @@ class criterion(nn.Module):
         initial_weight[-1] = back_coef
         self.register_buffer('initial_weight', initial_weight)
 
-    def forward(self, prediction, target, device):
+    def forward(self, prediction, target):
         num_box = 0
         dice = self.matcher(prediction,target)
         pred_type = prediction['pred_logits']
