@@ -157,9 +157,9 @@ class criterion(nn.Module):
         self.class_num = class_num
         self.weight_dict = weight_dict
         self.back_coef = back_coef
-        self.initial_weight = torch.ones(class_num)
-        self.initial_weight[-1] = back_coef
-        self.register_buffer('initial_weight', self.initial_weight)
+        initial_weight = torch.ones(class_num)
+        initial_weight[-1] = back_coef
+        self.register_buffer('initial_weight', initial_weight)
 
     def forward(self, prediction, target, device):
         num_box = 0
