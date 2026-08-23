@@ -20,6 +20,8 @@ from loss_function import complete_iou_loss
 ssl._create_default_https_context = ssl._create_unverified_context
 
 device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
+torch.cuda.empty_cache()
+
 print(f"当前计算加速设备: {device}")
 
 class DETR_backbone(nn.Module):
@@ -158,7 +160,7 @@ class criterion(nn.Module):
         self.weight_dict = weight_dict
         self.back_coef = back_coef
         initial_weight = torch.ones(class_num)
-        initial_weight[-1] = back_coef
+        initial_weight[0] = back_coef
         self.register_buffer('initial_weight', initial_weight)
 
     def forward(self, prediction, target):
@@ -169,12 +171,12 @@ class criterion(nn.Module):
         box_match_pred = []
         box_match_target = []
         #class_num处object is background
-        target_type = torch.full(pred_type.shape[:2],self.class_num, device = device)
+        target_type = torch.full(pred_type.shape[:2],0, device = device)
         for i, (index_i, index_j) in enumerate(dice):
             num_box += len(index_i)
             target_type[i][index_i] = target[i]['labels'][index_j]
             box_match_pred.append(pred_box[i, index_i])
-            box_match_target.append(target[i]['labels'][index_j])
+            box_match_target.append(target[i]['boxes'][index_j])
 
         box_match_pred = torch.cat(box_match_pred, 0)
         box_match_target = torch.cat(box_match_target, 0)
@@ -209,7 +211,7 @@ class criterion(nn.Module):
 
         # 4. 合成逐样本的动态权重 modulating_weight [M]
         modulating_weight = a1 * b1 + a2 * b2 + a3 * b3
-        loss_bbox *= modulating_weight
+        loss_bbox = (loss_bbox * modulating_weight).sum() / num_box
         loss_overall ={
             'loss_bbox': loss_bbox,
             'loss_classification': loss_classif,
@@ -219,8 +221,8 @@ class criterion(nn.Module):
         return loss_overall
 
 def one_epoch_train(model, optimizer, train_loader,validation_loader, criterion):
-    losses_train = {}
-    losses_target = {}
+    loss_overall_train = 0
+    loss_overall_target = 0
     model.train()
     for image, target in train_loader:
         image_batch = torch.stack(image, dim=0).to(device)
@@ -229,6 +231,7 @@ def one_epoch_train(model, optimizer, train_loader,validation_loader, criterion)
         prediction = model(image_batch)
         losses_train = criterion(prediction, target)
         loss = sum(losses_train.values())
+        loss_overall_train += loss
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
@@ -237,11 +240,11 @@ def one_epoch_train(model, optimizer, train_loader,validation_loader, criterion)
             image_batch = torch.stack(image,dim=0).to(device)
             image_batch = image_batch.to(device)
             for t in target:
-                for key, value in t.item():
+                for key, value in t.items():
                     t[key] = value.to(device)
             prediction = model(image_batch)
-            losses_target = criterion(prediction, target)
-    return losses_train, losses_target
+            loss_overall_target += sum(criterion(prediction, target).values())
+    return loss_overall_train, loss_overall_target
 
 def detection_collate_fn(batch):
     return tuple(zip(*batch)) #多目标拆开来，默认的只接受单目标的tensor
@@ -255,18 +258,21 @@ def testing(model, data_loader, device):
             images_batch = torch.stack(images, dim=0).to(device)
             predictions = model(images_batch)
             targets_cpu = [{k: v.to('cpu') for k, v in t.items()} for t in targets]
-            predictions_cpu = [{k: v.to('cpu') for k, v in p.items()} for p in predictions]
+            prob = predictions['pred_logits'].softmax(-1)
+            scores, labels = prob[..., 1:].max(-1)  # 选出 0~8 范围内的物体类
+            labels += 1
+            boxes = predictions['pred_boxes']
 
             #Update label, as 0 means ground in the model
-            for t, p in zip(targets_cpu,predictions_cpu):
+            for t in (targets_cpu):
                 target_correct = t.copy()
-                target_correct['labels'] = target_correct['labels'] - 1
                 target_correct_sum.append(target_correct)
-
-                predict_correct = p.copy()
-                predict_correct['pred_logits'] = predict_correct['pred_logits'] - 1
-                predict_correct_sum.append(predict_correct)
-
+            for i in range (0,len(targets_cpu)):
+                predict_correct_sum.append({
+                    'boxes': boxes[i].cpu(),
+                    'scores': scores[i].cpu(),
+                    'labels': (labels[i]).cpu()
+                })
         metric.update(predict_correct_sum, target_correct_sum)
         result = metric.compute()
 
@@ -276,7 +282,7 @@ def testing(model, data_loader, device):
         print(f"mAP_75 (IoU=0.75)  : {result['map_75'].item():.4f}")  # 严格指标
         print("================================================\n")
         print(f"mAP Per Class:")
-        object_names = ['cage', 'frame', 'hook', 'anchor', 'tire', 'rov', 'plastic bucket', 'fish', 'oil drum']
+        object_names = ['background', 'cage', 'frame', 'hook', 'anchor', 'tire', 'rov', 'plastic bucket', 'fish', 'oil drum']
 
         map_per_class = result['map_per_class'].tolist()
         mar_per_class = result['mar_100_per_class'].tolist()
@@ -311,16 +317,13 @@ train_set, test_set = train_test_split(img, shuffle=True, random_state=20, test_
 train_set, validation_set = train_test_split(train_set, shuffle=True, random_state=20, test_size=0.1)
 train_data = UnderwaterData(path_label=path_label,
                                 path_image=path_img,
-                                train=train_set,
-                            isCNN=True)
+                                train=train_set)
 test_data = UnderwaterData(path_label=path_label,
                                path_image=path_img,
-                               train=test_set,
-                           isCNN=True)
+                               train=test_set)
 validation_set = UnderwaterData(path_label=path_label,
                                     path_image=path_img,
-                                    train=validation_set,
-                                isCNN=True)
+                                    train=validation_set)
 
 train_loader = DataLoader(
         train_data,
@@ -363,9 +366,10 @@ if __name__ == '__main__':
                                                  model=model, optimizer=optimizer,
                                                  train_loader=train_loader,
                                                  validation_loader = validation_loader)
+
         print(f'train loss in epoch{epoch_num}: {train_loss}')
         print(f'validation loss in epoch{epoch_num}: {valid_loss}')
-        if epoch//10 == epoch/10 and epoch>10:
+        if epoch%10 == 0:
             testing(model,test_loader,device)
 
 

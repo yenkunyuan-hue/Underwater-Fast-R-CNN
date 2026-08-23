@@ -51,12 +51,11 @@ class FC_with_dropout(nn.Module):
 
 
 class UnderwaterData(Dataset):
-    def __init__(self, path_image, path_label,train,isCNN:bool,augment=False):
+    def __init__(self, path_image, path_label,train,augment=False):
         self.path_image = path_image
         self.path_label = path_label
         self.train = train
         self.augment = augment
-        self.isCNN = isCNN
     def __len__(self):
         return len(self.train)
 
@@ -93,17 +92,12 @@ class UnderwaterData(Dataset):
         else:
             box = torch.zeros((0, 4), dtype=torch.float32)
             label = torch.zeros((0,), dtype=torch.int64)
-        if self.isCNN:
-            target = {
+
+        target = {
             'image_id': torch.tensor([item]),
             'boxes': box,
             'labels': label
         }
-        else:
-            target = {
-                'pred_boxes': box,
-                'pred_logits': label
-            }
         if self.augment and random.random() < 0.5:
             pic_tensor = torch.flip(pic_tensor, dims=[2])  # flip width axis (C,H,W)
             if box.shape[0] > 0:
