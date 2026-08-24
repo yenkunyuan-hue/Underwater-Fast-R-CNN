@@ -308,12 +308,12 @@ def one_epoch_train(model, train_loader, optimizer, device, validation_loader):
         targets = [{k: v.to(device) for k, v in t.items()} for t in targets] #load label and box into gpu
         loss_dict = model(images_batch,targets)
         losses = sum(loss for loss in loss_dict.values())
-        loss_box += loss_dict['loss_box_reg'].item()
         optimizer.zero_grad(set_to_none=True)
         losses.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=10.0)
         optimizer.step()
-        running_loss += losses.item()
+        loss_box += loss_dict['loss_box_reg'].item().detach()
+        running_loss += losses.item().detach()
         batch_count += 1
     batch_valid_count = 0
     loss_box_valid = 0
@@ -324,8 +324,8 @@ def one_epoch_train(model, train_loader, optimizer, device, validation_loader):
             images_batch = torch.stack(images, dim=0).to(device)
             targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
             loss_dict_valid = model(images_batch, targets)
-            loss_sum_dict += sum(loss for loss in loss_dict_valid.values()).item()
-            loss_box_valid += loss_dict_valid['loss_box_reg'].item()
+            loss_sum_dict += sum(loss for loss in loss_dict_valid.values()).item().detach()
+            loss_box_valid += loss_dict_valid['loss_box_reg'].item().detach()
             batch_valid_count +=1
     return round(running_loss / batch_count,3), round(loss_box / batch_count, 3), round(loss_sum_dict / batch_valid_count,3), round(loss_box_valid / batch_valid_count, 3)
 
