@@ -23,7 +23,7 @@ from S3_DSConv import DSConv
 from loss_function import CIoURoIHeads
 
 
-
+torch.cuda.empty_cache()
 ssl._create_default_https_context = ssl._create_unverified_context
 
 
@@ -598,16 +598,13 @@ if __name__ == "__main__":
     train_data = UnderwaterData(path_label=path_label,
                                 path_image=path_img,
                                 train=train_set,
-                                augment=True,
-                                isCNN=True)
+                                augment=True)
     test_data = UnderwaterData(path_label=path_label,
                                 path_image=path_img,
-                                train=test_set,
-                               isCNN=True)
+                                train=test_set)
     validation_set = UnderwaterData(path_label=path_label,
                                 path_image=path_img,
-                                train=validation_set,
-                                    isCNN=True)
+                                train=validation_set)
 
     train_loader = DataLoader(
         train_data,
@@ -617,13 +614,13 @@ if __name__ == "__main__":
     )
     test_loader = DataLoader(
         test_data,
-        batch_size = 4,
+        batch_size = 2,
     shuffle = False,
     collate_fn = detection_collate_fn
 )
     validation_loader = DataLoader(
         validation_set,
-        batch_size = 4,
+        batch_size = 2,
         shuffle=False,
         collate_fn= detection_collate_fn
     )

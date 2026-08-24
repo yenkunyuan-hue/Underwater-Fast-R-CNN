@@ -142,7 +142,7 @@ class DETR(nn.Module):
             feature_map+pos_map,
             query_tensor+query_embed
         )
-        pred_box = self.bbox(hidden_state)
+        pred_box = self.bbox(hidden_state).sigmoid()
         pred_type = self.class_head(hidden_state)
         prediction = {
             'pred_boxes':pred_box,
