@@ -608,7 +608,7 @@ if __name__ == "__main__":
 
     train_loader = DataLoader(
         train_data,
-        batch_size = 4,
+        batch_size = 2,
         shuffle=True,
         collate_fn=detection_collate_fn
     )
@@ -632,6 +632,7 @@ if __name__ == "__main__":
     optimizer = set_optimizer(model, freeze=True)
 
     for epoch in range(epoch_num):
+        torch.cuda.empty_cache()
         print(f"Current Epoch{epoch}")
         precision_history[0][epoch] = epoch
         (precision_history[1][epoch],
