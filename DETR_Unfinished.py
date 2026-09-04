@@ -213,8 +213,7 @@ class criterion(nn.Module):
         loss_bbox = (loss_bbox * modulating_weight).sum() / num_box
         loss_overall ={
             'loss_bbox': loss_bbox,
-            'loss_classification': loss_classif,
-            'loss_giou': loss_giou
+            'loss_classification': loss_classif
         }
         print(loss_overall)
         return loss_overall
@@ -362,6 +361,7 @@ optimizer = torch.optim.AdamW(model.parameters(), lr= 5e-6)
 if __name__ == '__main__':
     epoch_num = 100
     for epoch in range(0,epoch_num):
+        torch.cuda.empty_cache()
         train_loss, valid_loss = one_epoch_train(criterion=criterion,
                                                  model=model, optimizer=optimizer,
                                                  train_loader=train_loader,
