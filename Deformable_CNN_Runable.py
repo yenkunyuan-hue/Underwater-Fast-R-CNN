@@ -2,6 +2,7 @@ import cv2
 import torch
 import torch.nn as nn
 import random
+from pathlib import Path
 from torch.nn.functional import dropout
 from torchvision.models import vgg16 as model
 from torchvision.models import VGG16_Weights
@@ -586,6 +587,11 @@ precision_history = np.zeros((5, epoch_num))
 if __name__ == "__main__":
     # path_img = '/Users/yangkunyuan/PycharmProjects/Underwater/UMOD/vis/img'
     # path_label = '/Users/yangkunyuan/PycharmProjects/Underwater/UMOD/vis/labels'
+    RUN_DIR = Path(__file__).resolve().parent
+    HISTORY_PATH = RUN_DIR / "training-history.json"
+    TEST_METRICS_PATH = RUN_DIR / "test-metrics.json"
+    BEST_MODEL_PATH = RUN_DIR / "best.pt"
+    LAST_CHECKPOINT_PATH = RUN_DIR / "last.pt"
     path_img = '/ceph/home/student.aau.dk/fy14pi/Underwater/UMOD/vis/img'
     path_label = '/ceph/home/student.aau.dk/fy14pi/Underwater/UMOD/vis/labels'
 
