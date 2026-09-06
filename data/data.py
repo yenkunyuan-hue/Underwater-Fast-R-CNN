@@ -1,8 +1,74 @@
 import cv2
 import torch
 import random
-from torch.utils.data import Dataset
 
+from fontTools.ttLib.woff2 import bboxFormat
+from torch.utils.data import Dataset
+import albumentations as A
+IMAGE_SIZE = 512
+def make_transforms():
+    """Preserve the full image; apply random deformation only during training."""
+
+    def resize_and_pad():
+        a = A.Compose([
+            A.LongestMaxSize(
+                max_size=IMAGE_SIZE,
+                interpolation=cv2.INTER_LINEAR)]
+            +
+            [A.PadIfNeeded(
+                min_height=IMAGE_SIZE,
+                min_width=IMAGE_SIZE,
+                border_mode=cv2.BORDER_CONSTANT,
+                fill=0,
+            )],
+            bbox_params=A.BboxParams(
+            format='pascal_voc',  # 1. 指定传入的格式
+            label_fields=['category_ids'],  # 2. 告诉库对应的类别标签变量名
+            min_visibility=0.3))
+        return a
+
+    train_transform = A.Compose(
+        [
+            A.ElasticTransform(
+        alpha=1,
+        sigma=50,
+        interpolation=cv2.INTER_LINEAR,
+        border_mode=cv2.BORDER_CONSTANT,
+        fill=0,
+        p = 0.8
+    )]
+        + [
+            A.OneOf([
+            A.RandomBrightnessContrast(
+                brightness_limit= 0.1,
+                contrast_limit= 0.1, p=1),
+            A.GaussianBlur(
+                blur_limit=(3,3), p=1),
+                #blur_limit = kernel size
+            A.RandomGamma(gamma_limit=(80, 120), p=1.0)
+                #change the contrast/brightness[0.8,1.2]
+        ], p=0.8)]
+
+        + [
+            A.Flip(p=0.5),
+            A.Affine(
+                rotate = (-10,10),
+                translate_percent=(-0.05, 0.05),
+                scale=(0.95,1.05),
+                fill=0,
+                border_mode=cv2.BORDER_CONSTANT,
+                p = 0.5
+            )
+        ],
+        bbox_params=A.BboxParams(
+            format='pascal_voc',  # 1. 指定传入的格式
+            label_fields=['category_ids'],  # 2. 告诉库对应的类别标签变量名
+            min_visibility=0.3
+        )
+    )
+    validation_transform = resize_and_pad()
+    return train_transform, validation_transform
+train_transform, valid_transform = make_transforms()
 class UnderwaterData(Dataset):
     def __init__(self, path_image, path_label,train,augment=False):
         self.path_image = path_image
@@ -19,8 +85,6 @@ class UnderwaterData(Dataset):
         pic = cv2.imread(self.path_image + '/' + extract_id + '.jpg')
         pic = cv2.cvtColor(pic, cv2.COLOR_BGR2RGB)
         pic_h, pic_w, _ = pic.shape
-        pic_tensor = torch.from_numpy(pic).permute(2, 0, 1)
-        pic_tensor = pic_tensor.float() / 255  # float 32, normalize
 
         with open(self.path_label + '/' + extract_id + '.txt') as f:
             label_tra = f.readlines()
@@ -39,6 +103,9 @@ class UnderwaterData(Dataset):
             y_max = cy + heig / 2
             box.append([x_min, y_min, x_max, y_max])
             label.append(id+1)
+
+        pic_tensor = torch.from_numpy(pic).permute(2, 0, 1)
+        pic_tensor = pic_tensor.float() / 255  # float 32, normalize
         if len(box) != 0:
             box = torch.as_tensor(box, dtype=torch.float32)
             label = torch.as_tensor(label, dtype=torch.int64)
