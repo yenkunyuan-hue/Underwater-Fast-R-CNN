@@ -125,4 +125,5 @@ class UnderwaterData(Dataset):
                 flipped[:, 0] = pic_w - box[:, 2]  # new xmin = W - old xmax
                 flipped[:, 2] = pic_w - box[:, 0]  # new xmax = W - old xmin
                 box = flipped
+                target['boxes'] = box  # FIX: target 在翻转前已建好，原来只改了局部变量 box，标签框没跟着翻转
         return pic_tensor, target

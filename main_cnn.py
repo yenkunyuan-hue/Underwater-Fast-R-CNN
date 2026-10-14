@@ -7,6 +7,7 @@ from plot.graph_plot import *
 from data.data import UnderwaterData
 from model.CNN import *
 from loss.NMS import *
+from loss.early_stop import if_early_stop
 torch.cuda.empty_cache()
 
 def one_epoch_train(model, train_loader, optimizer, device, validation_loader):
@@ -16,7 +17,6 @@ def one_epoch_train(model, train_loader, optimizer, device, validation_loader):
     model.train()
     model.set_drop_out(rate=0.1)
     loss_sum_dict = 0
-    loss_box = 0
     for images, targets in train_loader:
         images_batch = torch.stack(images, dim=0).to(device)
         targets = [{k: v.to(device) for k, v in t.items()} for t in targets] #load label and box into gpu
@@ -26,28 +26,24 @@ def one_epoch_train(model, train_loader, optimizer, device, validation_loader):
         losses.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=10.0)
         optimizer.step()
-        loss_box += loss_dict['loss_box_reg'].item()
         running_loss += losses.item()
         batch_count += 1
     batch_valid_count = 0
     loss_box_valid = 0
     model.train()
-    model.set_drop_out(rate=0)
     with torch.no_grad():
         for images, targets in validation_loader:
             images_batch = torch.stack(images, dim=0).to(device)
             targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
             loss_dict_valid = model(images_batch, targets)
             loss_sum_dict += sum(loss for loss in loss_dict_valid.values()).item()
-            loss_box_valid += loss_dict_valid['loss_box_reg'].item()
             batch_valid_count +=1
-    return round(running_loss / batch_count,3), round(loss_box / batch_count, 3), round(loss_sum_dict / batch_valid_count,3), round(loss_box_valid / batch_valid_count, 3)
+    return round(running_loss / batch_count,3), round(loss_sum_dict / batch_valid_count,3)
 
 
 def testing(model, data_loader, device):
     metric = MeanAveragePrecision(iou_type="bbox", class_metrics=True)
     model.eval()
-    model.set_drop_out(rate=0)
     result_dict = {}
     target_dict={}
     target_correct_sum = []
@@ -145,18 +141,13 @@ def set_optimizer(model, freeze = True):
         print('解冻')
     return optimizer
 
-epoch_num = 60
-precision_history = np.zeros((5, epoch_num))
 
 #0: Average Loss, 1: Box Loss, 2: AL for validation, 3:Box for valid
 if __name__ == "__main__":
-    # path_img = '/Users/yangkunyuan/PycharmProjects/Underwater/UMOD/vis/img'
-    # path_label = '/Users/yangkunyuan/PycharmProjects/Underwater/UMOD/vis/labels'
     base_lr = 5e-5
     min_lr = 1e-5
-    warmup_epochs = 10
-    path_img = '/ceph/home/student.aau.dk/fy14pi/Underwater/UMOD/vis/img'
-    path_label = '/ceph/home/student.aau.dk/fy14pi/Underwater/UMOD/vis/labels'
+    path_img = 'UMOD/vis/img'
+    path_label = 'UMOD/vis/labels'
 
     img = os.listdir(path_img)
     for i in range(0, len(img)):
@@ -199,24 +190,16 @@ if __name__ == "__main__":
     FCN_model = fcnn()
     model = detector(model=FCN_model, anchor_sizes = anchor_sizes).to(device)
     optimizer = set_optimizer(model, freeze=True)
+    early_stop = True
 
-    for epoch in range(epoch_num):
+    while early_stop:
+        epoch += 1
         torch.cuda.empty_cache()
         print(f"Current Epoch{epoch}")
-        precision_history[0][epoch] = epoch
-        (precision_history[1][epoch],
-         precision_history[2][epoch],
-         precision_history[3][epoch],
-         precision_history[4][epoch]) = one_epoch_train(model, train_loader,
+        train_loss, validation_loss = one_epoch_train(model, train_loader,
                                                         optimizer, device, validation_loader)
-        if (epoch+1)//10 == ((epoch+1)/10) and (epoch+1) != 1:
-             prediction,target = testing(model,test_loader,device)
-             prediction = NMS_with_label(prediction=prediction, IOU_threshold=0.5)
-             graph_plot(path_image=path_img,prediction=prediction,round=epoch, target = target)
         if epoch+1 == 45:
             model.set_trainable(True)
             optimizer = set_optimizer(model, freeze=False)
     prediction, target = testing(model, test_loader, device)
-    #prediction = NMS_with_label(prediction=prediction, IOU_threshold=0.5)
-    graph_plot(path_image=path_img, prediction=prediction, round=epoch_num, target=target)
     loss_graph_plot(precision_history)

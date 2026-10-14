@@ -58,7 +58,9 @@ class DSConv(nn.Module):
         self.device = device
 
     def forward(self, f):
-        orig_w , orig_h = f.shape[2], f.shape[3]
+        # FIX: 原来写成 orig_w, orig_h = f.shape[2], f.shape[3]，H/W 反了，
+        # 非正方形特征图会被 interpolate 成 (W,H)，导致 stage3/P5 尺寸转置、内容被拉伸
+        orig_h, orig_w = f.shape[2], f.shape[3]
         offset = self.offset_conv(f)
         offset = self.bn(offset)
         # We need a range of deformation between -1 and 1 to mimic the snake's swing

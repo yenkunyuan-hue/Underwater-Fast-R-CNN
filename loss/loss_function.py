@@ -1,5 +1,8 @@
 import torch
+import torch.nn as nn  # FIX: criterion 继承 nn.Module，原来缺这个 import，导致 import 本文件即报 NameError
 import torch.nn.functional as f
+import torch.nn.functional as F  # FIX: criterion 里用的是大写 F
+from torchvision.ops import generalized_box_iou_loss  # FIX: criterion 里用到但未导入
 import math
 from torchvision.models.detection.roi_heads import RoIHeads
 from torchvision.models.detection._utils import BoxCoder
@@ -135,7 +138,7 @@ class criterion(nn.Module):
         box_match_pred = []
         box_match_target = []
         #class_num处object is background
-        target_type = torch.full(pred_type.shape[:2],0, device = device)
+        target_type = torch.full(pred_type.shape[:2],0, device = pred_type.device)  # FIX: 本文件没有全局 device，改用输入张量的 device
         for i, (index_i, index_j) in enumerate(dice):
             num_box += len(index_i)
             target_type[i][index_i] = target[i]['labels'][index_j]
@@ -158,7 +161,7 @@ class criterion(nn.Module):
         loss_ciou_average = loss_ciou.sum()/num_box
 
         if loss_ciou_average<0.2:
-            auto_ciou = torch.tensor(0.2).to(device)
+            auto_ciou = torch.tensor(0.2, device=ciou_vec.device)  # FIX: 本文件没有全局 device
         else:
             auto_ciou = loss_ciou_average
 
