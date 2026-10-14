@@ -2,7 +2,6 @@ import cv2
 import torch
 import random
 
-from fontTools.ttLib.woff2 import bboxFormat
 from torch.utils.data import Dataset
 import albumentations as A
 IMAGE_SIZE = 512
@@ -97,12 +96,25 @@ class UnderwaterData(Dataset):
             heig = float(part[4]) * pic_h  # Height
 
             # standard of RCNN box is xmin,ymin,xmax,ymax
-            x_min = cx - wid / 2
-            y_min = cy - heig / 2
-            x_max = cx + wid / 2
-            y_max = cy + heig / 2
+            # 裁剪到图像范围内：albumentations 的 pascal_voc 格式遇到越界框会直接报错
+            x_min = max(cx - wid / 2, 0)
+            y_min = max(cy - heig / 2, 0)
+            x_max = min(cx + wid / 2, pic_w)
+            y_max = min(cy + heig / 2, pic_h)
+            if x_max <= x_min or y_max <= y_min:  # 跳过退化框
+                continue
             box.append([x_min, y_min, x_max, y_max])
             label.append(id+1)
+
+        if self.augment:
+            # 用 make_transforms 里的 train_transform 同时变换图像和框，
+            # min_visibility 过滤掉的框，其类别也会从 category_ids 里一起去掉
+            augmented = train_transform(image=pic, bboxes=box, category_ids=label)
+            pic = augmented['image']
+            box = [list(b) for b in augmented['bboxes']]
+            label = list(augmented['category_ids'])
+        # 验证/测试集不用 valid_transform（resize 到 512 再 pad）：Faster R-CNN 内部会再 resize，
+        # 且 graph_plot 是在原图上画框、k-means anchor 也按原图尺寸算，保持原尺寸才能对得上
 
         pic_tensor = torch.from_numpy(pic).permute(2, 0, 1)
         pic_tensor = pic_tensor.float() / 255  # float 32, normalize
@@ -118,12 +130,4 @@ class UnderwaterData(Dataset):
             'boxes': box,
             'labels': label
         }
-        if self.augment and random.random() < 0.5:
-            pic_tensor = torch.flip(pic_tensor, dims=[2])  # flip width axis (C,H,W)
-            if box.shape[0] > 0:
-                flipped = box.clone()
-                flipped[:, 0] = pic_w - box[:, 2]  # new xmin = W - old xmax
-                flipped[:, 2] = pic_w - box[:, 0]  # new xmax = W - old xmin
-                box = flipped
-                target['boxes'] = box  # FIX: target 在翻转前已建好，原来只改了局部变量 box，标签框没跟着翻转
         return pic_tensor, target

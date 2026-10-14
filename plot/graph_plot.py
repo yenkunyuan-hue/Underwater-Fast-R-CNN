@@ -1,23 +1,19 @@
 import os
-import matplotlib as plt
+import matplotlib.pyplot as plt  # FIX: 原来是 import matplotlib as plt，plt.figure 不存在
 import cv2
 
 def loss_graph_plot(loss_history):
+    # FIX: one_epoch_train 现在只返回总 loss，box loss 那张图已没有数据，只画 train / validation 总 loss
     save_path = '/ceph/home/student.aau.dk/fy14pi/loss_overall'
-    if os.path.exists(save_path):
-        pass
-    else:
-        os.makedirs('loss_overall')
-    save_path_1 = '/ceph/home/student.aau.dk/fy14pi/loss_overall/Average_Loss.png'
-    save_path_2 = '/ceph/home/student.aau.dk/fy14pi/loss_overall/Box_Loss.png'
+    # FIX: 原来检查绝对路径、却用相对路径创建目录，换个运行目录就会 FileNotFoundError
+    os.makedirs(save_path, exist_ok=True)
+    save_path_1 = os.path.join(save_path, 'Average_Loss.png')
     x1 = loss_history[0]
-    y1 = (loss_history[1])
-    y2 = (loss_history[2])
-    y3 = (loss_history[3])
-    y4 = (loss_history[4])
+    y1 = loss_history[1]
+    y2 = loss_history[2]
     plt.figure()
     plt.plot(x1,y1, label = 'Trainning Loss', color = 'blue')
-    plt.plot(x1,y3, label = 'Validation Loss', color = 'red')
+    plt.plot(x1,y2, label = 'Validation Loss', color = 'red')
     plt.title('Average Loss Over Epoch')
 
     plt.xlabel('Epoch')
@@ -32,24 +28,8 @@ def loss_graph_plot(loss_history):
     plt.savefig(save_path_1)
     plt.close()
 
-    plt.figure()
-    plt.plot(x1, y2, label='Trainning Loss', color='blue')
-    plt.plot(x1, y4, label='Validation Loss', color='red')
-    plt.title('Box Loss Over Epoch')
-    plt.xlabel('Epoch')
-    plt.ylabel('Loss')
-    plt.legend(
-        loc='upper right',  # 锁定右上角
-        frameon=True,  # 开启图例外框
-        facecolor='white',  # 图例背景设为白色
-        framealpha=0.9,  # 背景透明度
-        fontsize=11
-    )
-    plt.savefig(save_path_2)
-    plt.close()
 
-
-def graph_plot(path_image, target, prediction, round):
+def graph_plot(path_image, target, prediction, round, test_set):  # FIX: test_set 在本模块未定义，改为参数传入
 
     object_name = ['cage', 'frame', 'hook', 'anchor', 'tire', 'rov', 'plastic bucket', 'fish', 'oil drum']
     colour_predict_box = (0, 255, 255)  # 亮黄色
@@ -58,10 +38,7 @@ def graph_plot(path_image, target, prediction, round):
     colour_target_text = (255, 0, 255)  # 亮洋红/紫粉色
 
     save_path = '/ceph/home/student.aau.dk/fy14pi/test_picture'
-    if os.path.exists(save_path):
-        pass
-    else:
-        os.makedirs('test_picture')
+    os.makedirs(save_path, exist_ok=True)  # FIX: 同 loss_graph_plot，原来用相对路径创建目录
 
     for image_id in prediction:
         save_path = '/ceph/home/student.aau.dk/fy14pi/test_picture'

@@ -31,6 +31,7 @@ def one_epoch_train(model, train_loader, optimizer, device, validation_loader):
     batch_valid_count = 0
     loss_box_valid = 0
     model.train()
+    model.set_drop_out(rate=0)  # FIX: 验证 loss 用来做早停，关掉 dropout 减少噪声
     with torch.no_grad():
         for images, targets in validation_loader:
             images_batch = torch.stack(images, dim=0).to(device)
@@ -133,8 +134,8 @@ def set_optimizer(model, freeze = True):
     ], weight_decay=1e-6)
     else:
         optimizer = torch.optim.AdamW([
-                {'params': model.model.stage1.parameters(), 'lr': 1e-6},
-                {'params': model.model.stage2.parameters(), 'lr': 1e-6},
+                {'params': model.model.stage1.parameters(), 'lr': 1e-5},
+                {'params': model.model.stage2.parameters(), 'lr': 1e-5},
                 {'params': base_params, 'lr': 4e-5},
                 {'params': dcn_offset_params, 'lr': 4e-5}
             ], weight_decay=1e-6)
@@ -142,10 +143,9 @@ def set_optimizer(model, freeze = True):
     return optimizer
 
 
-#0: Average Loss, 1: Box Loss, 2: AL for validation, 3:Box for valid
 if __name__ == "__main__":
     base_lr = 5e-5
-    min_lr = 1e-5
+    min_lr = 1e-6
     path_img = 'UMOD/vis/img'
     path_label = 'UMOD/vis/labels'
 
@@ -168,19 +168,19 @@ if __name__ == "__main__":
 
     train_loader = DataLoader(
         train_data,
-        batch_size = 2,
+        batch_size = 8,
         shuffle=True,
         collate_fn=CNN.detection_collate_fn
     )
     test_loader = DataLoader(
         test_data,
-        batch_size = 2,
+        batch_size = 8,
     shuffle = False,
     collate_fn = CNN.detection_collate_fn
 )
     validation_loader = DataLoader(
         validation_set,
-        batch_size = 2,
+        batch_size = 8,
         shuffle=False,
         collate_fn= detection_collate_fn
     )
@@ -190,16 +190,27 @@ if __name__ == "__main__":
     FCN_model = fcnn()
     model = detector(model=FCN_model, anchor_sizes = anchor_sizes).to(device)
     optimizer = set_optimizer(model, freeze=True)
-    early_stop = True
+    max_epoch = 100  # 早停没触发时的上限
+    unfreeze_epoch = 10
+    early_stopper = if_early_stop(patience=10)
+    loss_history = [[], [], []]  # 0: epoch, 1: train loss, 2: validation loss
 
-    while early_stop:
-        epoch += 1
+    for epoch in range(max_epoch):
         torch.cuda.empty_cache()
         print(f"Current Epoch{epoch}")
         train_loss, validation_loss = one_epoch_train(model, train_loader,
                                                         optimizer, device, validation_loader)
-        if epoch+1 == 45:
+        print(f"train loss: {train_loss}, validation loss: {validation_loss}")
+        loss_history[0].append(epoch)
+        loss_history[1].append(train_loss)
+        loss_history[2].append(validation_loss)
+        if early_stopper(validation_loss, model, epoch):
+            print(f"Early stop at epoch {epoch}, best epoch {early_stopper.best_epoch}, "
+                  f"best validation loss {early_stopper.best_loss}")
+            break
+        if epoch+1 == unfreeze_epoch:
             model.set_trainable(True)
             optimizer = set_optimizer(model, freeze=False)
+    early_stopper.load_best(model)  # FIX: 用验证 loss 最低那一轮的权重做测试
     prediction, target = testing(model, test_loader, device)
-    loss_graph_plot(precision_history)
+    loss_graph_plot(loss_history)
