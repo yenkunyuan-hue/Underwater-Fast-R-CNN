@@ -161,10 +161,12 @@ if __name__ == "__main__":
                                 augment=True)
     test_data = UnderwaterData(path_label=path_label,
                                 path_image=path_img,
-                                train=test_set)
+                                train=test_set,
+                                augment=False)
     validation_set = UnderwaterData(path_label=path_label,
                                 path_image=path_img,
-                                train=validation_set)
+                                train=validation_set,
+                                augment=False)
 
     train_loader = DataLoader(
         train_data,

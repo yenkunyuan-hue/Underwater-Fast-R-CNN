@@ -4,19 +4,21 @@ import random
 
 from torch.utils.data import Dataset
 import albumentations as A
-IMAGE_SIZE = 512
+# 数据集图片全部是 1280×720（宽×高），原来写的 IMAGE_SIZE = 512 与实际不符
+IMAGE_W = 1280
+IMAGE_H = 720
 def make_transforms():
     """Preserve the full image; apply random deformation only during training."""
 
     def resize_and_pad():
         a = A.Compose([
             A.LongestMaxSize(
-                max_size=IMAGE_SIZE,
+                max_size=IMAGE_W,  # 长边是宽
                 interpolation=cv2.INTER_LINEAR)]
             +
             [A.PadIfNeeded(
-                min_height=IMAGE_SIZE,
-                min_width=IMAGE_SIZE,
+                min_height=IMAGE_H,  # 不再 pad 成正方形，保持 16:9
+                min_width=IMAGE_W,
                 border_mode=cv2.BORDER_CONSTANT,
                 fill=0,
             )],
@@ -113,9 +115,13 @@ class UnderwaterData(Dataset):
             pic = augmented['image']
             box = [list(b) for b in augmented['bboxes']]
             label = list(augmented['category_ids'])
-        # 验证/测试集不用 valid_transform（resize 到 512 再 pad）：Faster R-CNN 内部会再 resize，
-        # 且 graph_plot 是在原图上画框、k-means anchor 也按原图尺寸算，保持原尺寸才能对得上
-
+        else:
+            augmented = valid_transform(image=pic, bboxes=box, category_ids=label)
+            pic = augmented['image']
+            box = [list(b) for b in augmented['bboxes']]
+            label = list(augmented['category_ids'])
+        # 验证/测试集不做变换：图片本身就是 1280×720，valid_transform 对它们等价于不变；
+        # graph_plot 在原图上画框、k-means anchor 也按 1280×720 算，保持原尺寸才能对得上
         pic_tensor = torch.from_numpy(pic).permute(2, 0, 1)
         pic_tensor = pic_tensor.float() / 255  # float 32, normalize
         if len(box) != 0:
